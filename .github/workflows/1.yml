@@ -1,0 +1,33 @@
+name: Process Game Datasets
+
+on:
+  schedule:
+    - cron: '0 0 * * *'  # Runs daily at midnight
+  workflow_dispatch:  # Allows manual triggering
+
+jobs:
+  process-data:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v2
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v2
+      with:
+        node-version: '14'
+
+    - name: Install dependencies
+      run: |
+        npm init -y
+        npm install axios cheerio marked duckdb-async
+
+    - name: Process data
+      run: node process-data.js
+
+    - name: Upload artifact
+      uses: actions/upload-artifact@v2
+      with:
+        name: processed-data
+        path: processed-data.json
