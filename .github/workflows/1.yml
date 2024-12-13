@@ -8,6 +8,8 @@ on:
 jobs:
   process-data:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write  # This line gives the job permission to write to the repository
 
     steps:
     - name: Checkout repository
@@ -26,8 +28,9 @@ jobs:
     - name: Process data
       run: node process-data.js
 
-    - name: Upload artifact
-      uses: actions/upload-artifact@v2
-      with:
-        name: processed-data
-        path: processed-data.json
+    - name: Commit and push if changed
+      run: |
+        git config --global user.email "github-actions[bot]@users.noreply.github.com"
+        git config --global user.name "GitHub Actions"
+        git add processed-data.json
+        git diff --quiet && git diff --staged --quiet || (git commit -m "Update processed data" && git push)
