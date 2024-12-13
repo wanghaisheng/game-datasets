@@ -1,46 +1,11 @@
 const axios = require('axios');
 const cheerio = require('cheerio');
-const marked = require('marked');
 const duckdb = require('duckdb-async');
+const fs = require('fs').promises;
 
 async function fetchMd() {
   const response = await axios.get('https://raw.githubusercontent.com/leomaurodesenv/game-datasets/refs/heads/master/README.md');
   return response.data;
-}
-
-function convertMdToJson(md) {
-  const tokens = marked.lexer(md);
-  const json = {
-    title: '',
-    sections: []
-  };
-
-  let currentSection = null;
-
-  for (const token of tokens) {
-    if (token.type === 'heading' && token.depth === 1) {
-      json.title = token.text;
-    } else if (token.type === 'heading' && token.depth === 2) {
-      currentSection = {
-        name: token.text,
-        items: []
-      };
-      json.sections.push(currentSection);
-    } else if (token.type === 'list' && currentSection) {
-      for (const item of token.items) {
-        const linkToken = item.tokens.find(t => t.type === 'link');
-        if (linkToken) {
-          currentSection.items.push({
-            name: linkToken.text,
-            url: linkToken.href,
-            description: item.text.replace(`[${linkToken.text}](${linkToken.href})`, '').trim()
-          });
-        }
-      }
-    }
-  }
-
-  return json;
 }
 
 async function getOgData(url) {
@@ -65,9 +30,23 @@ async function getOgData(url) {
 
 async function updateJsonWithOgData(json) {
   for (const section of json.sections) {
-    for (const item of section.items) {
-      const ogData = await getOgData(item.url);
-      Object.assign(item, ogData);
+    if (section.items) {
+      for (const item of section.items) {
+        if (item.link) {
+          const ogData = await getOgData(item.link);
+          Object.assign(item, ogData);
+        }
+      }
+    }
+    if (section.subsections) {
+      for (const subsection of section.subsections) {
+        for (const item of subsection.items) {
+          if (item.link) {
+            const ogData = await getOgData(item.link);
+            Object.assign(item, ogData);
+          }
+        }
+      }
     }
   }
   return json;
@@ -80,9 +59,10 @@ async function ingestJsonToDuckDb(json) {
   await conn.query(`
     CREATE TABLE game_datasets (
       section VARCHAR,
+      subsection VARCHAR,
       name VARCHAR,
-      url VARCHAR,
       description VARCHAR,
+      link VARCHAR,
       og_title VARCHAR,
       og_description VARCHAR,
       og_image VARCHAR
@@ -90,11 +70,23 @@ async function ingestJsonToDuckDb(json) {
   `);
 
   for (const section of json.sections) {
-    for (const item of section.items) {
-      await conn.query(`
-        INSERT INTO game_datasets (section, name, url, description, og_title, og_description, og_image)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-      `, [section.name, item.name, item.url, item.description, item.ogTitle, item.ogDescription, item.ogImage]);
+    if (section.items) {
+      for (const item of section.items) {
+        await conn.query(`
+          INSERT INTO game_datasets (section, subsection, name, description, link, og_title, og_description, og_image)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `, [section.name, null, item.name, item.description, item.link, item.ogTitle, item.ogDescription, item.ogImage]);
+      }
+    }
+    if (section.subsections) {
+      for (const subsection of section.subsections) {
+        for (const item of subsection.items) {
+          await conn.query(`
+            INSERT INTO game_datasets (section, subsection, name, description, link, og_title, og_description, og_image)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          `, [section.name, subsection.name, item.name, item.description, item.link, item.ogTitle, item.ogDescription, item.ogImage]);
+        }
+      }
     }
   }
 
@@ -106,14 +98,18 @@ async function ingestJsonToDuckDb(json) {
 }
 
 async function main() {
-  const md = await fetchMd();
-  let json = convertMdToJson(md);
+  // Load the existing JSON structure
+  const jsonContent = await fs.readFile('game-datasets.json', 'utf8');
+  let json = JSON.parse(jsonContent);
+
+  // Update JSON with OG data
   json = await updateJsonWithOgData(json);
+
+  // Ingest data into DuckDB
   // await ingestJsonToDuckDb(json);
 
-  // Save the processed data
-  const fs = require('fs');
-  fs.writeFileSync('processed-data.json', JSON.stringify(json, null, 2));
+  // Save the updated JSON
+  await fs.writeFile('processed-game-datasets.json', JSON.stringify(json, null, 2));
 }
 
 main().catch(console.error);
