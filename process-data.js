@@ -109,7 +109,7 @@ async function main() {
   const md = await fetchMd();
   let json = convertMdToJson(md);
   json = await updateJsonWithOgData(json);
-  await ingestJsonToDuckDb(json);
+  // await ingestJsonToDuckDb(json);
 
   // Save the processed data
   const fs = require('fs');
